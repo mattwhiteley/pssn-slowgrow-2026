@@ -1,4 +1,4 @@
-import pandasql as psql
+#import pandasql as psql
 import streamlit as st
 
 from flask import Flask, render_template, request, jsonify, redirect, make_response
