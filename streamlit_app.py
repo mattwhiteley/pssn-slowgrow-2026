@@ -1,53 +1,76 @@
+import pandasql as psql
 import streamlit as st
-from openai import OpenAI
 
-# Show title and description.
-st.title("📄 Document question answering")
-st.write(
-    "Upload a document below and ask a question about it – GPT will answer! "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-)
+from flask import Flask, render_template, request, jsonify, redirect, make_response
+from auth import set_admin_cookie, clear_admin_cookie, admin_required_route
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+import json
+import os
+from PIL import Image
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
 
-    # Let the user upload a file via `st.file_uploader`.
-    uploaded_file = st.file_uploader(
-        "Upload a document (.txt or .md)", type=("txt", "md")
+app = Flask(__name__)
+
+REGIONS_PATH = os.path.join("static", "regions.json")
+USERS_PATH = os.path.join("static", "users.json")
+MAP_PATH = os.path.join("static", "map.jpeg")
+
+
+def load_json(path):
+    with open(path, "r", encoding="utf8") as f:
+        return json.load(f)
+
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf8") as f:
+        json.dump(data, f, indent=2)
+
+
+@app.route("/")
+def index():
+    regions = load_json(REGIONS_PATH)
+    users = load_json(USERS_PATH)
+
+    img = Image.open(MAP_PATH)
+    w, h = img.size
+
+    return render_template(
+        "index.html",
+        regions=regions,
+        users=users,
+        img_width=w,
+        img_height=h
     )
 
-    # Ask the user for a question via `st.text_area`.
-    question = st.text_area(
-        "Now ask a question about the document!",
-        placeholder="Can you give me a short summary?",
-        disabled=not uploaded_file,
-    )
 
-    if uploaded_file and question:
+@app.post("/update_owner")
+def update_owner():
+    data = request.get_json()
+    region_index = int(data["id"])
+    owner_id = int(data["owner_id"])
 
-        # Process the uploaded file and question.
-        document = uploaded_file.read().decode()
-        messages = [
-            {
-                "role": "user",
-                "content": f"Here's a document: {document} \n\n---\n\n {question}",
-            }
-        ]
+    regions = load_json(REGIONS_PATH)
+    regions[region_index]["owner_id"] = owner_id
+    save_json(REGIONS_PATH, regions)
 
-        # Generate an answer using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            stream=True,
-        )
+    return jsonify({"status": "ok"})
 
-        # Stream the response to the app using `st.write_stream`.
-        st.write_stream(stream)
+@app.route("/login-admin")
+def login_admin():
+    response = make_response(redirect("/"))
+    return set_admin_cookie(response)
+
+
+@app.route("/logout")
+def logout():
+    response = make_response(redirect("/"))
+    return clear_admin_cookie(response)
+
+@app.route("/admin/delete-user", methods=["POST"])
+@admin_required_route
+def delete_user():
+    return "User deleted"
+
+
+if __name__ == "__main__":
+    app.run(debug=True)

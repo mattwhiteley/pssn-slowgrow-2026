@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ownership Map</title>
+    <style>
+        html, body { margin:0; padding:0; font-family:Arial,sans-serif; height:100%; }
+        #layout { display:flex; height:100%; }
+        #sidebar { width:250px; background:#f2f2f2; border-right:1px solid #ccc; padding:10px; overflow-y:auto; }
+        #sidebar h3 { margin-top:0; }
+        .legend-item { display:flex; align-items:center; margin:6px 0; font-size:14px; }
+        .legend-swatch { width:20px; height:20px; margin-right:8px; border-radius:4px; border:1px solid #444; }
+        #map-wrapper { flex:1; position:relative; overflow:auto; display:flex; justify-content:center; align-items:flex-start; padding:10px; }
+        #map-container { position:relative; display:inline-block; }
+        #map-image { display:block; width:100%; height:auto; }
+        svg#map-overlay { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:all; }
+        path { cursor:pointer; transition:fill 0.25s, stroke-width 0.1s; }
+        path:hover { stroke-width:3; }
+        #owner-menu { position:absolute; display:none; background:white; border:1px solid #333; border-radius:4px; padding:4px; z-index:9999; }
+        #tooltip { position:absolute; display:none; background:rgba(0,0,0,0.75); color:#fff; padding:6px 10px; border-radius:4px; pointer-events:none; font-size:14px; z-index:99999; }
+    </style>
+</head>
+<body>
+<div id="layout">
+    <div id="sidebar">
+        <h3>Owners</h3>
+        <div id="owner-counts"></div>
+    </div>
+    <div id="map-wrapper">
+        <div id="map-container">
+            <img id="map-image" src="{{ url_for('static', filename='map.jpeg') }}">
+            <svg id="map-overlay"
+                 viewBox="0 0 {{ img_width }} {{ img_height }}"
+                 preserveAspectRatio="xMinYMin meet">
+                {% for r in regions %}
+                    {% set owner = (users | selectattr('id','equalto',r.owner_id) | list).0 %}
+                    <path d="{{ r.d }}"
+                          data-region="{{ loop.index0 }}"
+                          data-owner="{{ r.owner_id }}"
+                          fill="{{ owner.color }}80"
+                          stroke="#000"
+                          stroke-width="1">
+                    </path>
+                {% endfor %}
+            </svg>
+        </div>
+    </div>
+</div>
+
+<select id="owner-menu">
+    {% for u in users %}
+    <option value="{{ u.id }}">{{ u.name }}</option>
+    {% endfor %}
+</select>
+<div id="tooltip"></div>
+
+<script>
+const menu = document.getElementById("owner-menu");
+const tooltip = document.getElementById("tooltip");
+const ownerCountsDiv = document.getElementById("owner-counts");
+let players = {{ users|tojson }};
+let map_regions = {{ regions|tojson }};
+let currentRegion = null;
+
+function recalcCounts() {
+    const counts = {};
+    players.forEach(u => counts[u.id] = 0);
+    map_regions.forEach(r => counts[r.owner_id]++);
+    ownerCountsDiv.innerHTML = "";
+    players.forEach(u => {
+        const div = document.createElement("div");
+        div.className = "legend-item";
+        div.innerHTML = `<div class="legend-swatch" style="background:${u.color}80"></div><strong>${u.name}</strong> (${counts[u.id]})`;
+        ownerCountsDiv.appendChild(div);
+    });
+}
+recalcCounts();
+
+document.querySelectorAll("svg path").forEach(path => {
+    path.addEventListener("click", (e) => {
+        e.stopPropagation();
+        currentRegion = e.target;
+
+        // Position dropdown at cursor using page coordinates
+        menu.style.left = (e.pageX + 5) + "px";
+        menu.style.top = (e.pageY + 5) + "px";
+        menu.style.display = "block";
+        menu.value = currentRegion.dataset.owner;
+    });
+
+    path.addEventListener("mousemove", (e) => {
+        const r = map_regions[e.target.dataset.region];
+        const owner = players.find(u => u.id == r.owner_id);
+        tooltip.textContent = `${r.name} — Owned by: ${owner.name}`;
+        tooltip.style.left = (e.pageX + 12) + "px";
+        tooltip.style.top = (e.pageY + 12) + "px";
+        tooltip.style.display = "block";
+    });
+
+    path.addEventListener("mouseleave", () => {
+        tooltip.style.display = "none";
+    });
+});
+
+menu.addEventListener("click", (e) => e.stopPropagation());
+
+menu.addEventListener("change", () => {
+    if (!currentRegion) return;
+    const regionIndex = currentRegion.dataset.region;
+    const ownerId = parseInt(menu.value);
+
+    map_regions[regionIndex].owner_id = ownerId;
+    const owner = players.find(u => u.id == ownerId);
+    currentRegion.setAttribute("fill", owner.color + "80");
+    currentRegion.dataset.owner = ownerId;
+
+    fetch("/update_owner", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: regionIndex, owner_id: ownerId })
+    });
+
+    recalcCounts();
+    menu.style.display = "none";
+});
+
+document.addEventListener("click", () => { menu.style.display = "none"; });
+</script>
+</body>
+</html>
